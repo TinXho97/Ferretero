@@ -1,0 +1,194 @@
+{
+  "entities": {
+    "empresa": {
+      "title": "Empresa",
+      "description": "Información de la ferretería o empresa.",
+      "type": "object",
+      "properties": {
+        "nombre": { "type": "string", "description": "Nombre de la empresa" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["nombre"]
+    },
+    "usuario": {
+      "title": "Usuario",
+      "description": "Perfil de usuario vinculado a una empresa.",
+      "type": "object",
+      "properties": {
+        "empresa_id": { "type": "string", "description": "ID de la empresa" },
+        "nombre": { "type": "string", "description": "Nombre completo" },
+        "rol": { "type": "string", "enum": ["admin", "empleado"], "description": "Rol del usuario" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["empresa_id", "nombre", "rol"]
+    },
+    "producto": {
+      "title": "Producto",
+      "description": "Artículos del inventario.",
+      "type": "object",
+      "properties": {
+        "empresa_id": { "type": "string" },
+        "nombre": { "type": "string" },
+        "descripcion": { "type": "string" },
+        "precio_compra": { "type": "number" },
+        "precio_venta": { "type": "number" },
+        "stock": { "type": "number" },
+        "stock_minimo": { "type": "number" },
+        "categoria": { "type": "string" },
+        "codigo_barras": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["empresa_id", "nombre", "precio_venta", "stock"]
+    },
+    "cliente": {
+      "title": "Cliente",
+      "description": "Clientes de la ferretería.",
+      "type": "object",
+      "properties": {
+        "empresa_id": { "type": "string" },
+        "nombre": { "type": "string" },
+        "telefono": { "type": "string" },
+        "email": { "type": "string" },
+        "direccion": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["empresa_id", "nombre"]
+    },
+    "proveedor": {
+      "title": "Proveedor",
+      "description": "Proveedores de mercancía.",
+      "type": "object",
+      "properties": {
+        "empresa_id": { "type": "string" },
+        "nombre": { "type": "string" },
+        "telefono": { "type": "string" },
+        "email": { "type": "string" },
+        "direccion": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["empresa_id", "nombre"]
+    },
+    "venta": {
+      "title": "Venta",
+      "description": "Registro de ventas realizadas.",
+      "type": "object",
+      "properties": {
+        "empresa_id": { "type": "string" },
+        "cliente_id": { "type": "string" },
+        "total": { "type": "number" },
+        "metodo_pago": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["empresa_id", "total", "metodo_pago"]
+    },
+    "detalle_venta": {
+      "title": "Detalle de Venta",
+      "description": "Productos incluidos en una venta.",
+      "type": "object",
+      "properties": {
+        "venta_id": { "type": "string" },
+        "producto_id": { "type": "string" },
+        "cantidad": { "type": "number" },
+        "precio_unitario": { "type": "number" },
+        "subtotal": { "type": "number" }
+      },
+      "required": ["venta_id", "producto_id", "cantidad", "precio_unitario", "subtotal"]
+    },
+    "compra": {
+      "title": "Compra",
+      "description": "Registro de compras a proveedores.",
+      "type": "object",
+      "properties": {
+        "empresa_id": { "type": "string" },
+        "proveedor_id": { "type": "string" },
+        "total": { "type": "number" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["empresa_id", "total"]
+    },
+    "detalle_compra": {
+      "title": "Detalle de Compra",
+      "description": "Productos incluidos en una compra.",
+      "type": "object",
+      "properties": {
+        "compra_id": { "type": "string" },
+        "producto_id": { "type": "string" },
+        "cantidad": { "type": "number" },
+        "precio_unitario": { "type": "number" },
+        "subtotal": { "type": "number" }
+      },
+      "required": ["compra_id", "producto_id", "cantidad", "precio_unitario", "subtotal"]
+    },
+    "caja": {
+      "title": "Caja",
+      "description": "Control de efectivo en caja.",
+      "type": "object",
+      "properties": {
+        "empresa_id": { "type": "string" },
+        "nombre": { "type": "string" },
+        "saldo_actual": { "type": "number" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["empresa_id", "nombre", "saldo_actual"]
+    },
+    "movimiento_caja": {
+      "title": "Movimiento de Caja",
+      "description": "Ingresos y egresos de efectivo.",
+      "type": "object",
+      "properties": {
+        "caja_id": { "type": "string" },
+        "tipo": { "type": "string", "enum": ["ingreso", "egreso"] },
+        "monto": { "type": "number" },
+        "concepto": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["caja_id", "tipo", "monto", "concepto"]
+    }
+  },
+  "firestore": {
+    "/empresas/{empresaId}": {
+      "schema": "empresa",
+      "description": "Colección de empresas."
+    },
+    "/usuarios/{usuarioId}": {
+      "schema": "usuario",
+      "description": "Colección de perfiles de usuario."
+    },
+    "/productos/{productoId}": {
+      "schema": "producto",
+      "description": "Colección de productos."
+    },
+    "/clientes/{clienteId}": {
+      "schema": "cliente",
+      "description": "Colección de clientes."
+    },
+    "/proveedores/{proveedorId}": {
+      "schema": "proveedor",
+      "description": "Colección de proveedores."
+    },
+    "/ventas/{ventaId}": {
+      "schema": "venta",
+      "description": "Colección de ventas."
+    },
+    "/detalles_venta/{detalleId}": {
+      "schema": "detalle_venta",
+      "description": "Detalles de cada venta."
+    },
+    "/compras/{compraId}": {
+      "schema": "compra",
+      "description": "Colección de compras."
+    },
+    "/detalles_compra/{detalleId}": {
+      "schema": "detalle_compra",
+      "description": "Detalles de cada compra."
+    },
+    "/cajas/{cajaId}": {
+      "schema": "caja",
+      "description": "Colección de cajas."
+    },
+    "/movimientos_caja/{movimientoId}": {
+      "schema": "movimiento_caja",
+      "description": "Movimientos de caja."
+    }
+  }
+}
