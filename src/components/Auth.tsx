@@ -1,20 +1,7 @@
 import React, { useState } from 'react';
-import { auth, db } from '../lib/firebase';
-import { 
-  createUserWithEmailAndPassword, 
-  signInWithEmailAndPassword, 
-  updateProfile 
-} from 'firebase/auth';
-import { 
-  doc, 
-  setDoc, 
-  collection, 
-  addDoc, 
-  serverTimestamp 
-} from 'firebase/firestore';
+import { supabase } from '../lib/supabase';
 import { motion } from 'motion/react';
 import { LogIn, UserPlus, Mail, Lock, User, Building, Hammer, Wrench, ShieldCheck, Zap } from 'lucide-react';
-import { handleFirestoreError, OperationType } from '../lib/firestore-utils';
 
 export const Auth = ({ onDemoAccess }: { onDemoAccess: () => void }) => {
   const [loading, setLoading] = useState(false);
@@ -32,39 +19,48 @@ export const Auth = ({ onDemoAccess }: { onDemoAccess: () => void }) => {
 
     try {
       if (isRegister) {
-        // 1. Create Auth User
-        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-        const user = userCredential.user;
+        // 1. Registro en Auth de Supabase
+        const { data: authData, error: authError } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            data: {
+              full_name: fullName,
+            }
+          }
+        });
 
-        // 2. Update Profile
-        await updateProfile(user, { displayName: fullName });
+        if (authError) throw authError;
 
-        // 3. Create Empresa
-        let empresaId = '';
-        try {
-          const empresaRef = await addDoc(collection(db, 'empresas'), {
-            nombre: companyName,
-            created_at: serverTimestamp()
-          });
-          empresaId = empresaRef.id;
-        } catch (err) {
-          handleFirestoreError(err, OperationType.CREATE, 'empresas');
-        }
+        if (authData.user) {
+          // 2. Crear Empresa
+          const { data: companyData, error: companyError } = await supabase
+            .from('empresas')
+            .insert([{ nombre: companyName }])
+            .select()
+            .single();
 
-        // 4. Create Usuario Profile
-        try {
-          await setDoc(doc(db, 'usuarios', user.uid), {
-            empresa_id: empresaId,
-            nombre: fullName,
-            rol: 'admin',
-            created_at: serverTimestamp()
-          });
-        } catch (err) {
-          handleFirestoreError(err, OperationType.CREATE, `usuarios/${user.uid}`);
+          if (companyError) throw companyError;
+
+          // 3. Crear Perfil de Usuario
+          const { error: profileError } = await supabase
+            .from('usuarios')
+            .insert([{
+              id: authData.user.id,
+              empresa_id: companyData.id,
+              nombre: fullName,
+              rol: 'admin'
+            }]);
+
+          if (profileError) throw profileError;
         }
       } else {
-        // Sign In
-        await signInWithEmailAndPassword(auth, email, password);
+        // Inicio de sesión
+        const { error: loginError } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+        if (loginError) throw loginError;
       }
     } catch (err: any) {
       console.error('Auth Error:', err);

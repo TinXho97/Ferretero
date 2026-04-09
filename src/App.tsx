@@ -35,29 +35,7 @@ import {
   Hammer
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { auth, db } from './lib/firebase';
-import { 
-  onAuthStateChanged, 
-  signOut 
-} from 'firebase/auth';
-import { 
-  collection, 
-  query, 
-  where, 
-  onSnapshot, 
-  doc, 
-  getDoc, 
-  getDocs, 
-  setDoc, 
-  addDoc, 
-  updateDoc, 
-  deleteDoc, 
-  serverTimestamp,
-  increment,
-  writeBatch,
-  getDocFromServer
-} from 'firebase/firestore';
-import { handleFirestoreError, OperationType } from './lib/firestore-utils';
+import { supabase } from './lib/supabase';
 import { Auth } from './components/Auth';
 
 // --- COMPONENTES DE UI REDISEÑADOS ---
@@ -360,25 +338,26 @@ const Inventory = ({ products, userProfile, refreshData }: any) => {
   };
 
   const saveEdit = async () => {
-    try {
-      await updateDoc(doc(db, 'productos', editingId!), {
+    const { error } = await supabase
+      .from('productos')
+      .update({
         nombre: tempProduct.nombre,
         precio_venta: tempProduct.precio_venta,
         stock: tempProduct.stock,
-      });
+      })
+      .eq('id', editingId);
+    
+    if (!error) {
       setEditingId(null);
-    } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, `productos/${editingId}`);
     }
   };
 
   const deleteProduct = async (id: string) => {
     if (confirm('¿Estás seguro de eliminar este producto?')) {
-      try {
-        await deleteDoc(doc(db, 'productos', id));
-      } catch (err) {
-        handleFirestoreError(err, OperationType.DELETE, `productos/${id}`);
-      }
+      await supabase
+        .from('productos')
+        .delete()
+        .eq('id', id);
     }
   };
 
@@ -517,21 +496,19 @@ const ProductModal = ({ onClose, onSave, userProfile }: any) => {
   const [code, setCode] = useState('');
 
   const handleSave = async () => {
-    try {
-      await addDoc(collection(db, 'productos'), {
+    const { error } = await supabase
+      .from('productos')
+      .insert([{
         empresa_id: userProfile.empresa_id,
         nombre: name,
         precio_venta: parseFloat(price),
         precio_compra: parseFloat(cost),
         stock: parseInt(stock),
         stock_minimo: parseInt(minStock),
-        codigo_barras: code,
-        created_at: serverTimestamp()
-      });
-      onSave();
-    } catch (err) {
-      handleFirestoreError(err, OperationType.CREATE, 'productos');
-    }
+        codigo_barras: code
+      }]);
+    
+    if (!error) onSave();
   };
 
   return (
@@ -588,11 +565,7 @@ const Directory = ({ title, items, type, userProfile, refreshData }: any) => {
   const deleteItem = async (id: string) => {
     if (confirm(`¿Estás seguro de eliminar este ${type === 'customer' ? 'cliente' : 'proveedor'}?`)) {
       const table = type === 'customer' ? 'clientes' : 'proveedores';
-      try {
-        await deleteDoc(doc(db, table, id));
-      } catch (err) {
-        handleFirestoreError(err, OperationType.DELETE, `${table}/${id}`);
-      }
+      await supabase.from(table).delete().eq('id', id);
     }
   };
 
@@ -680,19 +653,17 @@ const ContactModal = ({ type, onClose, onSave, userProfile }: any) => {
 
   const handleSave = async () => {
     const table = type === 'customer' ? 'clientes' : 'proveedores';
-    try {
-      await addDoc(collection(db, table), {
+    const { error } = await supabase
+      .from(table)
+      .insert([{
         empresa_id: userProfile.empresa_id,
         nombre,
         email,
         telefono,
-        direccion,
-        created_at: serverTimestamp()
-      });
-      onSave();
-    } catch (err) {
-      handleFirestoreError(err, OperationType.CREATE, table);
-    }
+        direccion
+      }]);
+    
+    if (!error) onSave();
   };
 
   return (
@@ -744,13 +715,11 @@ const Purchases = ({ products, userProfile, refreshData }: any) => {
   }, [userProfile]);
 
   const fetchPurchases = async () => {
-    try {
-      const q = query(collection(db, 'compras'), where('empresa_id', '==', userProfile.empresa_id));
-      const snapshot = await getDocs(q);
-      setPurchaseOrders(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    } catch (err) {
-      handleFirestoreError(err, OperationType.LIST, 'compras');
-    }
+    const { data } = await supabase
+      .from('compras')
+      .select('*, proveedores(nombre)')
+      .eq('empresa_id', userProfile.empresa_id);
+    if (data) setPurchaseOrders(data);
   };
 
   return (
@@ -839,39 +808,34 @@ const PurchaseModal = ({ products, onClose, onSave, userProfile }: any) => {
   };
 
   const handleSave = async () => {
-    try {
-      const batch = writeBatch(db);
-      const total = items.reduce((acc, i) => acc + (i.cost * i.qty), 0);
-      
-      const purchaseRef = doc(collection(db, 'compras'));
-      batch.set(purchaseRef, {
-        empresa_id: userProfile.empresa_id,
-        total,
-        created_at: serverTimestamp()
-      });
+    const total = items.reduce((acc, i) => acc + (i.cost * i.qty), 0);
+    const { data: purchase, error: pError } = await supabase
+      .from('compras')
+      .insert([{ empresa_id: userProfile.empresa_id, total }])
+      .select()
+      .single();
+    
+    if (pError) return;
 
-      for (const i of items) {
-        const detailRef = doc(collection(db, 'detalles_compra'));
-        batch.set(detailRef, {
-          compra_id: purchaseRef.id,
-          producto_id: i.id,
-          cantidad: i.qty,
-          precio_unitario: i.cost,
-          subtotal: i.cost * i.qty
-        });
+    const details = items.map(i => ({
+      compra_id: purchase.id,
+      producto_id: i.id,
+      cantidad: i.qty,
+      precio_unitario: i.cost,
+      subtotal: i.cost * i.qty
+    }));
 
-        const productRef = doc(db, 'productos', i.id);
-        batch.update(productRef, {
-          stock: increment(i.qty),
-          precio_compra: i.cost
-        });
-      }
+    await supabase.from('detalle_compras').insert(details);
 
-      await batch.commit();
-      onSave();
-    } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, 'compras/batch');
+    // Update stock
+    for (const item of items) {
+      await supabase
+        .from('productos')
+        .update({ stock: item.stock + item.qty, precio_compra: item.cost })
+        .eq('id', item.id);
     }
+
+    onSave();
   };
 
   return (
@@ -996,35 +960,25 @@ const Cashier = ({ userProfile }: any) => {
   }, [userProfile]);
 
   const fetchMovements = async () => {
-    try {
-      // 1. Get Cashier for company
-      const q = query(collection(db, 'cajas'), where('empresa_id', '==', userProfile.empresa_id));
-      const snapshot = await getDocs(q);
-      
-      let cashierDoc;
-      if (snapshot.empty) {
-        // Create initial cashier if not exists
-        const newCashierRef = await addDoc(collection(db, 'cajas'), {
-          empresa_id: userProfile.empresa_id,
-          nombre: 'Caja Principal',
-          saldo_actual: 0,
-          created_at: serverTimestamp()
-        });
-        const newDoc = await getDoc(newCashierRef);
-        cashierDoc = newDoc;
-      } else {
-        cashierDoc = snapshot.docs[0];
-      }
-      
-      if (cashierDoc) {
-        setBalance(cashierDoc.data().saldo_actual);
-        // 2. Get Movements
-        const movQ = query(collection(db, 'movimientos_caja'), where('caja_id', '==', cashierDoc.id));
-        const movSnapshot = await getDocs(movQ);
-        setMovements(movSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      }
-    } catch (err) {
-      handleFirestoreError(err, OperationType.LIST, 'cajas/movimientos');
+    // 1. Get Cashier for company
+    const { data: cashier } = await supabase
+      .from('cajas')
+      .select('*')
+      .eq('empresa_id', userProfile.empresa_id)
+      .single();
+    
+    if (cashier) {
+      setBalance(cashier.saldo_actual);
+      // 2. Get Movements
+      const { data: movs } = await supabase
+        .from('movimientos_caja')
+        .select('*')
+        .eq('caja_id', cashier.id)
+        .order('created_at', { ascending: false });
+      if (movs) setMovements(movs);
+    } else {
+      // Create initial cashier if not exists
+      await supabase.from('cajas').insert([{ empresa_id: userProfile.empresa_id, nombre: 'Caja Principal', saldo_actual: 0 }]);
     }
   };
 
@@ -1202,125 +1156,118 @@ export default function App() {
   const [isAuthReady, setIsAuthReady] = useState(false);
 
   useEffect(() => {
-    const testConnection = async () => {
-      try {
-        await getDocFromServer(doc(db, 'test', 'connection'));
-      } catch (error) {
-        if(error instanceof Error && error.message.includes('the client is offline')) {
-          console.error("Please check your Firebase configuration. ");
-        }
-      }
-    };
-    testConnection();
-
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        setSession(user);
-        // Fetch user profile
-        try {
-          const profileDoc = await getDoc(doc(db, 'usuarios', user.uid));
-          if (profileDoc.exists()) {
-            setUserProfile({ id: profileDoc.id, ...profileDoc.data() });
-          }
-        } catch (err) {
-          handleFirestoreError(err, OperationType.GET, `usuarios/${user.uid}`);
-        }
-      } else {
-        setSession(null);
-        setUserProfile(null);
-      }
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      if (session) fetchUserProfile(session.user.id);
       setLoading(false);
-      setIsAuthReady(true);
     });
 
-    return () => unsubscribe();
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      if (session) fetchUserProfile(session.user.id);
+      else setUserProfile(null);
+      setLoading(false);
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
+
+  const fetchUserProfile = async (userId: string) => {
+    const { data } = await supabase
+      .from('usuarios')
+      .select('*, empresas(*)')
+      .eq('id', userId)
+      .single();
+    if (data) setUserProfile(data);
+  };
 
   useEffect(() => {
     if (!userProfile) return;
 
     const empresaId = userProfile.empresa_id;
 
-    // Real-time listeners
-    const unsubProducts = onSnapshot(
-      query(collection(db, 'productos'), where('empresa_id', '==', empresaId)),
-      (snapshot) => {
-        setProducts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      },
-      (err) => handleFirestoreError(err, OperationType.LIST, 'productos')
-    );
+    // Initial fetch
+    fetchAllData(empresaId);
 
-    const unsubSales = onSnapshot(
-      query(collection(db, 'ventas'), where('empresa_id', '==', empresaId)),
-      (snapshot) => {
-        setSales(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      },
-      (err) => handleFirestoreError(err, OperationType.LIST, 'ventas')
-    );
+    // Real-time subscriptions
+    const productsSub = supabase
+      .channel('products-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'productos', filter: `empresa_id=eq.${empresaId}` }, () => fetchAllData(empresaId))
+      .subscribe();
 
-    const unsubClients = onSnapshot(
-      query(collection(db, 'clientes'), where('empresa_id', '==', empresaId)),
-      (snapshot) => {
-        setCustomers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      },
-      (err) => handleFirestoreError(err, OperationType.LIST, 'clientes')
-    );
-
-    const unsubSuppliers = onSnapshot(
-      query(collection(db, 'proveedores'), where('empresa_id', '==', empresaId)),
-      (snapshot) => {
-        setSuppliers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      },
-      (err) => handleFirestoreError(err, OperationType.LIST, 'proveedores')
-    );
+    const salesSub = supabase
+      .channel('sales-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'ventas', filter: `empresa_id=eq.${empresaId}` }, () => fetchAllData(empresaId))
+      .subscribe();
 
     return () => {
-      unsubProducts();
-      unsubSales();
-      unsubClients();
-      unsubSuppliers();
+      supabase.removeChannel(productsSub);
+      supabase.removeChannel(salesSub);
     };
   }, [userProfile]);
+
+  const fetchAllData = async (empresaId: string) => {
+    const [prods, sls, custs, supps] = await Promise.all([
+      supabase.from('productos').select('*').eq('empresa_id', empresaId),
+      supabase.from('ventas').select('*').eq('empresa_id', empresaId),
+      supabase.from('clientes').select('*').eq('empresa_id', empresaId),
+      supabase.from('proveedores').select('*').eq('empresa_id', empresaId)
+    ]);
+
+    if (prods.data) setProducts(prods.data);
+    if (sls.data) setSales(sls.data);
+    if (custs.data) setCustomers(custs.data);
+    if (supps.data) setSuppliers(supps.data);
+  };
 
   const handleSaleComplete = async (cart: any[], total: number) => {
     if (!userProfile) return;
 
     try {
-      const batch = writeBatch(db);
-      
       // 1. Create Sale
-      const saleRef = doc(collection(db, 'ventas'));
-      batch.set(saleRef, {
-        empresa_id: userProfile.empresa_id,
-        usuario_id: userProfile.id,
-        total,
-        iva: total * 0.19,
-        metodo_pago: 'efectivo',
-        created_at: serverTimestamp(),
-      });
+      const { data: sale, error: saleError } = await supabase
+        .from('ventas')
+        .insert([{
+          empresa_id: userProfile.empresa_id,
+          usuario_id: userProfile.id,
+          total,
+          iva: total * 0.19
+        }])
+        .select()
+        .single();
 
-      // 2. Create Details & Update Stock
+      if (saleError) throw saleError;
+
+      // 2. Create Sale Details & Update Stock
+      const details = cart.map(item => ({
+        venta_id: sale.id,
+        producto_id: item.id,
+        cantidad: item.qty,
+        precio_unitario: item.price,
+        subtotal: item.price * item.qty
+      }));
+
+      const { error: detailsError } = await supabase
+        .from('detalle_ventas')
+        .insert(details);
+
+      if (detailsError) throw detailsError;
+
+      // 3. Update Stock for each product
       for (const item of cart) {
-        const detailRef = doc(collection(db, 'detalles_venta'));
-        batch.set(detailRef, {
-          venta_id: saleRef.id,
-          producto_id: item.id,
-          cantidad: item.qty,
-          precio_unitario: item.price,
-          subtotal: item.price * item.qty,
-        });
-
-        const productRef = doc(db, 'productos', item.id);
-        batch.update(productRef, {
-          stock: increment(-item.qty)
-        });
+        const { error: stockError } = await supabase
+          .from('productos')
+          .update({ stock: item.stock - item.qty })
+          .eq('id', item.id);
+        
+        if (stockError) throw stockError;
       }
 
-      await batch.commit();
+      // Refresh data
+      fetchAllData(userProfile.empresa_id);
       setActiveTab('dashboard');
-      return true;
     } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, 'ventas/batch');
+      console.error("Error completing sale:", err);
     }
   };
 
@@ -1329,7 +1276,7 @@ export default function App() {
       setIsDemo(false);
       setUserProfile(null);
     } else {
-      await signOut(auth);
+      await supabase.auth.signOut();
     }
   };
 
@@ -1338,13 +1285,14 @@ export default function App() {
       id: 'demo-user',
       nombre: 'Usuario Demo',
       rol: 'Administrador',
-      empresa_id: 'demo-company-id',
+      empresa_id: '00000000-0000-0000-0000-000000000000', // Use a default or create one
       empresas: {
         nombre: 'SurBytes Ferretero Demo'
       }
     };
     setIsDemo(true);
     setUserProfile(demoProfile);
+    fetchAllData(demoProfile.empresa_id);
   };
 
   if (loading && !isDemo) {
